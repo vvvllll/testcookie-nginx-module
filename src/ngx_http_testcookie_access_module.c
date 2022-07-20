@@ -1237,10 +1237,7 @@ ngx_http_testcookie_nexturl_variable(ngx_http_request_t *r,
 static ngx_http_testcookie_ctx_t *
 ngx_http_testcookie_get_uid(ngx_http_request_t *r, ngx_http_testcookie_conf_t *conf)
 {
-    ngx_int_t                   n;
-#if (NGX_DEBUG)
-    ngx_table_elt_t             **cookies;
-#endif
+    ngx_table_elt_t             *cookie;
     ngx_http_testcookie_conf_t  *ucf = conf;
     ngx_http_testcookie_ctx_t   *ctx;
     struct sockaddr_in          *sin;
@@ -1366,22 +1363,14 @@ ngx_http_testcookie_get_uid(ngx_http_request_t *r, ngx_http_testcookie_conf_t *c
                    "input data: \"%V\"", check);
 
 
-    n = ngx_http_parse_multi_header_lines(&r->headers_in.cookies, &conf->name,
+    cookie = ngx_http_parse_multi_header_lines(r, r->headers_in.cookie, &conf->name,
                                           &ctx->cookie);
-    if (n == NGX_DECLINED) {
+    if (cookie == NULL) {
         return ctx;
     }
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "ctx uid cookie: \"%V\"", &ctx->cookie);
-
-#if (NGX_DEBUG)
-    cookies = r->headers_in.cookies.elts;
-
-    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "client sent cookies \"%V\"",
-                      &cookies[n]->value);
-#endif
 
     if (ctx->cookie.len != MD5_DIGEST_LENGTH*2) {
         return ctx;
@@ -2340,8 +2329,7 @@ ngx_hextobin(u_char *dst, u_char *src, size_t len)
 static ngx_int_t
 ngx_http_testcookie_nocache(ngx_http_request_t *r)
 {
-    ngx_uint_t           i;
-    ngx_table_elt_t     *e, *cc, **ccp;
+    ngx_table_elt_t     *e, *cc;
 
     e = r->headers_out.expires;
     if (e == NULL) {
@@ -2360,36 +2348,25 @@ ngx_http_testcookie_nocache(ngx_http_request_t *r)
     e->value.len = sizeof("Mon, 28 Sep 1970 06:00:00 GMT") - 1;
     e->value.data = (u_char *) "Thu, 01 Jan 1970 00:00:01 GMT";
 
-    ccp = r->headers_out.cache_control.elts;
-    if (ccp == NULL) {
-
-        if (ngx_array_init(&r->headers_out.cache_control, r->pool,
-                           1, sizeof(ngx_table_elt_t *))
-            != NGX_OK)
-        {
-            return NGX_ERROR;
-        }
-
-        ccp = ngx_array_push(&r->headers_out.cache_control);
-        if (ccp == NULL) {
-            return NGX_ERROR;
-        }
-
+    cc = r->headers_out.cache_control;
+    if (cc == NULL) {
         cc = ngx_list_push(&r->headers_out.headers);
         if (cc == NULL) {
             return NGX_ERROR;
         }
 
+        r->headers_out.cache_control = cc;
+        cc->next = NULL;
+
         cc->hash = 1;
         ngx_str_set(&cc->key, "Cache-Control");
-        *ccp = cc;
-
     } else {
-        for (i = 1; i < r->headers_out.cache_control.nelts; i++) {
-            ccp[i]->hash = 0;
+        for (cc = cc->next; cc; cc = cc->next) {
+            cc->hash = 0;
         }
 
-        cc = ccp[0];
+        cc = r->headers_out.cache_control;
+        cc->next = NULL;
     }
 
     ngx_str_set(&cc->value, "no-cache");
